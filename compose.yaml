@@ -1,0 +1,25 @@
+# Exemple de déploiement (à adapter).
+services:
+  olivetin:
+    image: ghcr.io/loorisr/olivetin-lite:latest
+    container_name: olivetin
+    user: "1000:1000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      - TZ=Europe/Paris
+    ports:
+      - 1337:1337
+    volumes:
+      - ./config:/config:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M

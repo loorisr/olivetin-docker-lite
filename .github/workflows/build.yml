@@ -1,0 +1,79 @@
+name: Build OliveTin Lite
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # vérifie chaque jour s'il y a une nouvelle release OliveTin
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Reconstruire même si l'image existe déjà"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: [Dockerfile, .github/workflows/build.yml]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/olivetin-lite
+  EXTRA_PACKAGES: ""
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(gh release view -R OliveTin/OliveTin --json tagName --jq .tagName)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          IMG="${IMAGE,,}"
+          if [ "${{ github.event_name }}" != "schedule" ] || ! docker buildx imagetools inspect "$IMG:$VERSION" >/dev/null 2>&1; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Build de $IMG:$VERSION"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "$IMG:$VERSION existe déjà, rien à faire"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: img
+        run: echo "name=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            OLIVETIN_VERSION=${{ needs.check.outputs.version }}
+            EXTRA_PACKAGES=${{ env.EXTRA_PACKAGES }}
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ needs.check.outputs.version }}
+            ${{ steps.img.outputs.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
